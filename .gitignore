@@ -1,0 +1,14 @@
+# Local cluster context and credentials -- never commit these.
+.env
+*.local
+kubeconfig
+*.kubeconfig
+
+# Output from script runs.
+*.log
+
+# Editor and OS cruft.
+.idea/
+.vscode/
+*.swp
+.DS_Store

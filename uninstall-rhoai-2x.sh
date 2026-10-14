@@ -121,14 +121,16 @@ for i in json.load(sys.stdin)['items']:
     done
   done
 
-  # Their controller left with the operator, so nothing will ever clear these
-  # and the CRD delete below would hang on them.
-  echo "stripping orphaned notebook finalizers"
-  oc get notebooks.kubeflow.org -A -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null |
-    while read -r ns name; do
-      [ -n "${name:-}" ] || continue
-      oc patch notebook.kubeflow.org "$name" -n "$ns" --type=merge -p '{"metadata":{"finalizers":[]}}'
-    done
+  # Their controllers left with the operator, so nothing will ever clear these
+  # and the CRD deletes below would hang on them.
+  for kind in notebooks.kubeflow.org inferenceservices.serving.kserve.io; do
+    echo "stripping orphaned ${kind%%.*} finalizers"
+    oc get "$kind" -A -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' 2>/dev/null |
+      while read -r ns name; do
+        [ -n "${name:-}" ] || continue
+        oc patch "$kind" "$name" -n "$ns" --type=merge -p '{"metadata":{"finalizers":[]}}'
+      done
+  done
 
   # Left behind by the uninstall. They have to go before 3.x installs: the v1
   # DataScienceCluster is a stored version the v2 CRD does not serve, which is
@@ -138,6 +140,14 @@ for i in json.load(sys.stdin)['items']:
   for c in $(oc get crd -o name 2>/dev/null | grep -Ee 'opendatahub|kubeflow'); do
     oc delete "$c" --timeout=60s
   done
+
+  # KServe ships as part of 2.x but under its own group, so the pattern above
+  # does not catch it. 3.x reinstalls these itself; leaving the 2.x copies in
+  # place has the same stored-version problem as the DataScienceCluster CRD.
+  echo "deleting leftover KServe CRDs"
+  for c in $(oc get crd -o name 2>/dev/null | grep -Ee 'serving\.kserve\.io'); do
+    oc delete "$c" --timeout=60s
+  done
 }
 
 verify() {
@@ -145,11 +155,11 @@ verify() {
   echo
 
   local ns
-  ns=$(oc get ns -o name 2>/dev/null | grep -Ee 'redhat-ods|rhods' | wc -l)
+  ns=$(oc get ns -o name 2>/dev/null | grep -cEe 'redhat-ods|rhods')
   [ "$ns" -eq 0 ] && ok "RHOAI namespaces gone" || nok "RHOAI namespaces gone" "$ns remaining"
 
   local crds
-  crds=$(oc get crd -o name 2>/dev/null | grep -cEe 'opendatahub|kubeflow')
+  crds=$(oc get crd -o name 2>/dev/null | grep -cEe 'opendatahub|kubeflow|serving\.kserve\.io')
   [ "$crds" -eq 0 ] && ok "2.x CRDs gone" || nok "2.x CRDs gone" "$crds remaining"
 
   local hooks
